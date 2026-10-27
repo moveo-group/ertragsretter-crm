@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { requireStaff } from '@/lib/auth';
+import { can, requireStaff } from '@/lib/auth';
 import { Badge } from '@/components/Badge';
 import { ORDER_STATUS, SOURCE, ROOF, SLOT, dateShort, num, money, timeAgo } from '@/lib/labels';
 import { acceptOrder } from './actions';
@@ -14,9 +14,12 @@ type InboxOrder = {
   services: { name: string } | null;
 };
 
-export default async function Dashboard({ searchParams }: { searchParams: Promise<{ auftrag?: string }> }) {
+export default async function Dashboard({ searchParams }: { searchParams: Promise<{ auftrag?: string; fehler?: string }> }) {
   const { supabase, staff } = await requireStaff();
-  const { auftrag } = await searchParams;
+  const { auftrag, fehler } = await searchParams;
+  const finance = can(staff, 'finance');
+  const ops = can(staff, 'customers') || can(staff, 'dispatch');
+  const none = { count: 0 } as { count: number | null };
 
   const now = new Date();
   const inAWeek = new Date(now.getTime() + 7 * 864e5);
@@ -29,8 +32,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       .order('created_at', { ascending: false })
       .limit(30),
     supabase.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'neu'),
-    supabase.from('documents').select('id', { count: 'exact', head: true }).eq('type', 'angebot').in('status', ['entwurf', 'versendet']),
-    supabase.from('documents').select('id', { count: 'exact', head: true }).eq('type', 'rechnung').in('status', ['versendet', 'ueberfaellig']),
+    finance ? supabase.from('documents').select('id', { count: 'exact', head: true }).eq('type', 'angebot').in('status', ['entwurf', 'versendet']) : Promise.resolve(none),
+    finance ? supabase.from('documents').select('id', { count: 'exact', head: true }).eq('type', 'rechnung').in('status', ['versendet', 'ueberfaellig']) : Promise.resolve(none),
     supabase.from('appointments').select('id', { count: 'exact', head: true }).gte('starts_at', now.toISOString()).lt('starts_at', inAWeek.toISOString()),
   ]);
 
@@ -46,17 +49,19 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
           <h1>{greet}, {staff.full_name}</h1>
           <span className="sub">{now.toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</span>
         </div>
-        <Link href="/kunden" className="btn btn-primary">+ Kunde / Auftrag</Link>
+        {can(staff, 'customers') && <Link href="/kunden" className="btn btn-primary">+ Kunde / Auftrag</Link>}
       </header>
+      {fehler === 'keine-berechtigung' && <p className="notice" role="alert">Für diesen Bereich hast du keine Berechtigung.</p>}
+      {!ops && !finance && <p className="notice">Dir sind noch keine Bereiche freigeschaltet. Bitte wende dich an Marcel.</p>}
 
       <section className="kpis" aria-label="Kennzahlen">
         <div className="kpi"><span className="label">Neue Buchungen</span><span className="value">{newCount.count ?? 0}</span><span className="hint">warten auf Annahme</span></div>
         <div className="kpi"><span className="label">Termine nächste 7 Tage</span><span className="value">{appts.count ?? 0}</span><span className="hint">Marcel, Thomas, Marie</span></div>
-        <div className="kpi"><span className="label">Offene Angebote</span><span className="value">{offers.count ?? 0}</span><span className="hint">Entwurf oder versendet</span></div>
-        <div className="kpi dark"><span className="label">Offene Rechnungen</span><span className="value">{invoices.count ?? 0}</span><span className="hint">versendet oder überfällig</span></div>
+        {finance && <div className="kpi"><span className="label">Offene Angebote</span><span className="value">{offers.count ?? 0}</span><span className="hint">Entwurf oder versendet</span></div>}
+        {finance && <div className="kpi dark"><span className="label">Offene Rechnungen</span><span className="value">{invoices.count ?? 0}</span><span className="hint">versendet oder überfällig</span></div>}
       </section>
 
-      <div className="cols">
+      {ops && <div className="cols">
         <section className="card col-main" aria-labelledby="inbox-h" style={{ gap: 0 }}>
           <div className="card-head">
             <h2 id="inbox-h">Buchungseingang</h2>
@@ -98,7 +103,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               <div><dt>Anlage</dt><dd>{sel.plants ? `${num(sel.plants.kwp, 1)} kWp · ${num(sel.area_m2 ?? sel.plants.area_m2)} m²` : '–'}</dd></div>
               <div><dt>Dach / Zugang</dt><dd>{sel.plants ? `${ROOF[sel.plants.roof]} · ${sel.plants.freely_accessible ? 'frei' : 'prüfen'}` : '–'}</dd></div>
               <div><dt>Besetzung</dt><dd>{sel.crew_size ? `${sel.crew_size} ${sel.crew_size === 1 ? 'Person' : 'Personen'}${sel.needs_robot ? ' + Roboter' : ''}` : 'wird bei Annahme berechnet'}</dd></div>
-              <div><dt>Richtpreis (netto)</dt><dd>{sel.estimated_price != null ? money(sel.estimated_price) : 'wird bei Annahme berechnet'}</dd></div>
+              {finance && <div><dt>Richtpreis (netto)</dt><dd>{sel.estimated_price != null ? money(sel.estimated_price) : 'wird bei Annahme berechnet'}</dd></div>}
               <div><dt>Eingang</dt><dd>{timeAgo(sel.created_at)} · {SOURCE[sel.source]}</dd></div>
               <div><dt>Ort</dt><dd>{sel.customers?.city ?? '–'}</dd></div>
             </dl>
@@ -117,7 +122,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
             <p className="tiny">Angebot in Lexware Office und Einplanung folgen in den nächsten Ausbaustufen.</p>
           </section>
         )}
-      </div>
+      </div>}
     </>
   );
 }

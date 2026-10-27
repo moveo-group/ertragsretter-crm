@@ -50,6 +50,13 @@ create table staff (
   is_drone_pilot  boolean not null default false,   -- darf Thermografieflüge durchführen
   weekly_hours    numeric(4,1) not null default 40,
   active          boolean not null default true,
+  email           text,
+  -- Zugriffsrechte (pro Person frei kombinierbar)
+  perm_customers  boolean not null default true,    -- Kunden, Anlagen, Fotos, Aufträge sehen & bearbeiten
+  perm_dispatch   boolean not null default true,    -- Disposition / Termine planen
+  perm_finance    boolean not null default false,   -- Angebote, Rechnungen, Zahlungen, offene Posten, Umsätze
+  perm_team       boolean not null default false,   -- Mitarbeiter anlegen und Rechte vergeben
+  perm_settings   boolean not null default false,   -- Preise und Regeln ändern
   created_at      timestamptz not null default now()
 );
 

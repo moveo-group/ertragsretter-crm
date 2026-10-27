@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { requireStaff } from '@/lib/auth';
+import { can, requireStaff } from '@/lib/auth';
 import { Badge } from '@/components/Badge';
 import {
   ASSESSMENT_ITEMS, CLEANING, CUSTOMER_KIND, DOCUMENT_STATUS, ORDER_STATUS, PHOTO_CATEGORY, PHOTO_SOURCE,
@@ -22,7 +22,10 @@ export default async function Kundenakte({ params, searchParams }: {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ fotos?: string }>;
 }) {
-  const { supabase } = await requireStaff();
+  const { supabase, staff } = await requireStaff();
+  const finance = can(staff, 'finance');
+  const edit = can(staff, 'customers');
+  if (!edit && !can(staff, 'dispatch')) notFound();
   const { id } = await params;
   const { fotos: photoFilter } = await searchParams;
 
@@ -33,7 +36,9 @@ export default async function Kundenakte({ params, searchParams }: {
     supabase.from('contacts').select('*').eq('customer_id', id).order('created_at'),
     supabase.from('plants').select('*, site_assessments(*)').eq('customer_id', id).order('created_at'),
     supabase.from('photos').select('*').eq('customer_id', id).order('created_at', { ascending: false }),
-    supabase.from('documents').select('*').eq('customer_id', id).order('issued_on', { ascending: false, nullsFirst: true }),
+    finance
+      ? supabase.from('documents').select('*').eq('customer_id', id).order('issued_on', { ascending: false, nullsFirst: true })
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
     supabase.from('orders').select('id, order_no, status, source, wish_date, wish_slot, estimated_price, services(name), appointments(starts_at)').eq('customer_id', id).order('created_at', { ascending: false }),
     supabase.from('events').select('*').eq('customer_id', id).order('occurred_at', { ascending: false }).limit(100),
     supabase.from('services').select('id, name').eq('active', true).order('sort'),
@@ -84,16 +89,16 @@ export default async function Kundenakte({ params, searchParams }: {
             </span>
           </div>
         </div>
-        <a href="#neuer-auftrag" className="btn btn-primary">+ Neuer Auftrag</a>
+        {edit && <a href="#neuer-auftrag" className="btn btn-primary">+ Neuer Auftrag</a>}
       </header>
 
       <section className="kpis" aria-label="Kennzahlen">
-        <div className="kpi"><span className="label">Umsatz gesamt (netto)</span><span className="value">{money(revenue)}</span><span className="hint">{invoices.length} Rechnungen</span></div>
-        <div className="kpi" style={open.length ? { background: 'var(--amber-bg)', borderColor: '#F2D27A' } : undefined}>
+        {finance && <div className="kpi"><span className="label">Umsatz gesamt (netto)</span><span className="value">{money(revenue)}</span><span className="hint">{invoices.length} Rechnungen</span></div>}
+        {finance && <div className="kpi" style={open.length ? { background: 'var(--amber-bg)', borderColor: '#F2D27A' } : undefined}>
           <span className="label">Offene Posten</span>
           <span className="value">{open.length ? money(open.reduce((s, d) => s + Number(d.net_amount ?? 0), 0)) : 'keine'}</span>
           <span className="hint">{open.map((d) => `${d.number ?? 'ohne Nr.'} fällig ${date(d.due_on)}`).join(' · ') || 'alles bezahlt'}</span>
-        </div>
+        </div>}
         <div className="kpi"><span className="label">Letzte Reinigung</span><span className="value">{date(lastCleaned)}</span><span className="hint">{plants.length} {plants.length === 1 ? 'Anlage' : 'Anlagen'}</span></div>
         <div className="kpi dark">
           <span className="label">Nächster Termin</span>
@@ -132,7 +137,7 @@ export default async function Kundenakte({ params, searchParams }: {
               })}
             </div>
             {photos.length === 0 && <p className="small">Noch keine Fotos{photoFilter ? ' in dieser Kategorie' : ''}.</p>}
-            <details className="add">
+            {edit && <details className="add">
               <summary>Fotos hinzufügen</summary>
               <form action={uploadPhotos}>
                 <input type="hidden" name="customer_id" value={id} />
@@ -151,7 +156,7 @@ export default async function Kundenakte({ params, searchParams }: {
                 <div className="field"><label htmlFor="caption">Beschreibung</label><input id="caption" name="caption" placeholder="z. B. Baumreihe Westseite, 8 m Abstand" /></div>
                 <button type="submit" className="btn btn-dark">Hochladen</button>
               </form>
-            </details>
+            </details>}
           </section>
 
           {/* Zugang & Arbeitsmittel je Anlage */}
@@ -180,7 +185,7 @@ export default async function Kundenakte({ params, searchParams }: {
                       </div>
                     </div>
                   ))}
-                  <button type="submit" className="btn btn-sm" style={{ marginTop: 8 }}>Bewertung speichern</button>
+                  {edit && <button type="submit" className="btn btn-sm" style={{ marginTop: 8 }}>Bewertung speichern</button>}
                 </form>
               </section>
             );
@@ -191,7 +196,7 @@ export default async function Kundenakte({ params, searchParams }: {
             <div className="card-head"><h2 id="orders-h">Aufträge</h2></div>
             <div className="table-wrap">
               <table style={{ minWidth: 600 }}>
-                <thead><tr><th>Nr.</th><th>Leistung</th><th>Wunschtermin</th><th>Quelle</th><th className="num">Richtpreis</th><th>Status</th></tr></thead>
+                <thead><tr><th>Nr.</th><th>Leistung</th><th>Wunschtermin</th><th>Quelle</th>{finance && <th className="num">Richtpreis</th>}<th>Status</th></tr></thead>
                 <tbody>
                   {orders.map((o) => (
                     <tr key={o.id}>
@@ -199,7 +204,7 @@ export default async function Kundenakte({ params, searchParams }: {
                       <td>{o.services?.name}</td>
                       <td>{dateShort(o.wish_date)}{o.wish_slot ? ` · ${SLOT[o.wish_slot]}` : ''}</td>
                       <td>{SOURCE[o.source]}</td>
-                      <td className="num">{money(o.estimated_price)}</td>
+                      {finance && <td className="num">{money(o.estimated_price)}</td>}
                       <td><Badge tone={ORDER_STATUS[o.status].tone}>{ORDER_STATUS[o.status].label}</Badge></td>
                     </tr>
                   ))}
@@ -207,7 +212,7 @@ export default async function Kundenakte({ params, searchParams }: {
               </table>
               {orders.length === 0 && <p className="empty">Noch keine Aufträge.</p>}
             </div>
-            <div className="card-pad" id="neuer-auftrag">
+            {edit && <div className="card-pad" id="neuer-auftrag">
               <details className="add" open={orders.length === 0}>
                 <summary>Neuer Auftrag (z. B. telefonische Buchung)</summary>
                 <form action={createOrder}>
@@ -232,11 +237,11 @@ export default async function Kundenakte({ params, searchParams }: {
                   <button type="submit" className="btn btn-primary">Auftrag anlegen</button>
                 </form>
               </details>
-            </div>
+            </div>}
           </section>
 
-          {/* Rechnungen & Zahlungen */}
-          <section className="card" aria-labelledby="inv-h">
+          {/* Rechnungen & Zahlungen – nur mit Finanz-Recht */}
+          {finance && <section className="card" aria-labelledby="inv-h">
             <div className="card-head"><h2 id="inv-h">Rechnungen &amp; Zahlungen</h2><span className="small">Lexware-Abgleich folgt in Ausbaustufe 4</span></div>
             <div className="table-wrap">
               <table style={{ minWidth: 760 }}>
@@ -292,7 +297,7 @@ export default async function Kundenakte({ params, searchParams }: {
                 </form>
               </details>
             </div>
-          </section>
+          </section>}
         </div>
 
         <div className="col-side">
@@ -312,7 +317,7 @@ export default async function Kundenakte({ params, searchParams }: {
               );
             })}
             {contacts.length === 0 && <p className="small">Noch keine Ansprechpartner.</p>}
-            <details className="add">
+            {edit && <details className="add">
               <summary>Ansprechpartner hinzufügen</summary>
               <form action={addContact}>
                 <input type="hidden" name="customer_id" value={id} />
@@ -325,7 +330,7 @@ export default async function Kundenakte({ params, searchParams }: {
                 <label style={{ display: 'flex', gap: 8, fontSize: 14 }}><input type="checkbox" name="is_onsite_contact" /> Ansprechpartner vor Ort</label>
                 <button type="submit" className="btn btn-dark">Speichern</button>
               </form>
-            </details>
+            </details>}
           </section>
 
           {/* Anlagen */}
@@ -354,7 +359,7 @@ export default async function Kundenakte({ params, searchParams }: {
                 </div>
               );
             })}
-            <details className="add" open={plants.length === 0}>
+            {edit && <details className="add" open={plants.length === 0}>
               <summary>Anlage hinzufügen</summary>
               <form action={addPlant}>
                 <input type="hidden" name="customer_id" value={id} />
@@ -376,18 +381,18 @@ export default async function Kundenakte({ params, searchParams }: {
                 <label style={{ display: 'flex', gap: 8, fontSize: 14 }}><input type="checkbox" name="not_accessible" /> Dach nicht frei zugänglich</label>
                 <button type="submit" className="btn btn-dark">Anlage speichern</button>
               </form>
-            </details>
+            </details>}
           </section>
 
           {/* Historie */}
           <section className="card card-pad" aria-labelledby="hist-h">
             <h2 id="hist-h" style={{ marginBottom: 12 }}>Historie</h2>
-            <form action={addNote} style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+            {edit && <form action={addNote} style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
               <input type="hidden" name="customer_id" value={id} />
               <label htmlFor="note_title" className="sr-only">Notiz</label>
               <input id="note_title" name="title" placeholder="Notiz, z. B. Telefonat mit Herrn Lindner" style={{ flex: '1 1 200px', height: 40, border: '1px solid var(--border-strong)', borderRadius: 10, padding: '0 10px' }} />
               <button className="btn btn-sm" type="submit">Notieren</button>
-            </form>
+            </form>}
             <div className="timeline">
               {events.map((e) => (
                 <div key={e.id} className="tl-item">

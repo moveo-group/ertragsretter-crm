@@ -7,7 +7,8 @@ Technik: **Next.js** (gehostet auf Vercel) + **Supabase** (Datenbank, Login, Fot
 
 | Bereich | Stand |
 |---|---|
-| Login nur für Team (Marcel, Thomas, Marie) | ✅ |
+| Login nur für Team, Rechte pro Mitarbeiter (Kunden, Disposition, Finanzen, Mitarbeiter, Preise) | ✅ |
+| Mitarbeiter anlegen und Rechte vergeben im CRM, eigenes Passwort ändern | ✅ |
 | Übersicht mit Kennzahlen und Buchungseingang, „Annehmen“ setzt Besetzung + Richtpreis nach Regeln | ✅ |
 | Kundenliste, Suche, neuer Kunde | ✅ |
 | Kundenakte: Ansprechpartner, Anlagen, Ertragsverlust-Hinweis, Fotos mit Kategorien, Zugang & Arbeitsmittel, Aufträge, Rechnungen & Zahlungsstatus, Historie | ✅ |
@@ -15,7 +16,7 @@ Technik: **Next.js** (gehostet auf Vercel) + **Supabase** (Datenbank, Login, Fot
 | Lexware Office: Angebote/Rechnungen erzeugen, Zahlungen abgleichen | Stufe 3 |
 | Kunden-App (Web-App) + Website-Formular | Stufe 4 |
 
-Zugriffsrechte sind in der Datenbank selbst festgelegt (Row-Level-Security) und mit 21 automatischen Tests geprüft.
+Zugriffsrechte sind in der Datenbank selbst festgelegt (Row-Level-Security) und mit 31 automatischen Tests geprüft.
 
 ---
 
@@ -33,22 +34,41 @@ Zugriffsrechte sind in der Datenbank selbst festgelegt (Row-Level-Security) und 
 
 ### 2. Team-Konten anlegen
 1. **Authentication → Users → Add user → Create new user**: E-Mail + Passwort für Marcel, Thomas, Marie („Auto Confirm User“ anhaken).
-2. Im **SQL Editor** die drei Personen als Team eintragen (E-Mails anpassen):
+2. Im **SQL Editor** die drei Personen als **Admins mit vollem Zugriff** eintragen (E-Mails anpassen):
 
 ```sql
-insert into staff (id, full_name, initials, role, can_work_alone, is_drone_pilot)
-select id, 'Marcel', 'MT', 'admin', true, true from auth.users where email = 'marcel@…';
-insert into staff (id, full_name, initials, role, can_work_alone, is_drone_pilot)
-select id, 'Thomas', 'TH', 'field', true, false from auth.users where email = 'thomas@…';
-insert into staff (id, full_name, initials, role, can_work_alone, is_drone_pilot)
-select id, 'Marie', 'MA', 'office', false, false from auth.users where email = 'marie@…';
+insert into staff (id, full_name, initials, email, role, can_work_alone, is_drone_pilot,
+                   perm_customers, perm_dispatch, perm_finance, perm_team, perm_settings)
+select id, v.full_name, v.initials, email, 'admin', v.alone, v.pilot, true, true, true, true, true
+from auth.users
+join (values ('marcel@…', 'Marcel', 'MT', true,  true),
+             ('thomas@…', 'Thomas', 'TH', true,  false),
+             ('marie@…',  'Marie',  'MA', false, false)) as v(mail, full_name, initials, alone, pilot)
+  on auth.users.email = v.mail;
 ```
+
+Alle weiteren Mitarbeiter legt ihr danach direkt im CRM unter **Mitarbeiter & Rechte** an.
+
+### Zugriffsrechte
+Jeder Mitarbeiter bekommt Rechte einzeln (Vorlagen: Inhaber, Büro, Außendienst):
+
+| Recht | erlaubt |
+|---|---|
+| Kundendaten | Kunden, Ansprechpartner, Anlagen, Fotos, Zugang, Aufträge sehen und bearbeiten |
+| Disposition | Termine und Einsätze planen (sieht dafür Kunden und Aufträge, darf sie aber nicht ändern) |
+| Finanzen | Angebote, Rechnungen, Zahlungseingänge, offene Forderungen, Umsätze, Richtpreise |
+| Mitarbeiter verwalten | Mitarbeiter anlegen, deaktivieren, Rechte vergeben |
+| Preise & Regeln | Leistungen, Preise und Planungsregeln ändern |
+
+Die Rechte gelten in der Datenbank selbst – ohne Finanz-Recht liefert sie Rechnungen gar nicht erst aus.
+Niemand kann sich selbst das Verwaltungsrecht entziehen oder sich deaktivieren (Schutz vor Aussperren).
 
 ### 3. Auf Vercel veröffentlichen
 1. Auf [vercel.com](https://vercel.com) mit GitHub anmelden → **Add New → Project** → dieses Repository importieren.
 2. Unter **Environment Variables** eintragen (Werte aus Supabase → **Project Settings → API**):
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY` (**geheim**, nur für „Mitarbeiter anlegen“; niemals weitergeben)
 3. **Settings → Functions → Region: Frankfurt (fra1)**, damit Daten in der EU bleiben.
 4. **Deploy**. Nach ca. 2 Minuten ist das CRM unter `https://<projekt>.vercel.app` erreichbar.
 

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { requireStaff } from '@/lib/auth';
+import { requirePerm } from '@/lib/auth';
 import { parseGermanNumber } from '@/lib/rules';
 
 const str = (fd: FormData, k: string) => {
@@ -18,7 +18,7 @@ const numOrNull = (fd: FormData, k: string) => {
 const bool = (fd: FormData, k: string) => fd.get(k) === 'on';
 
 export async function createCustomer(fd: FormData) {
-  const { supabase } = await requireStaff();
+  const { supabase } = await requirePerm('customers');
   const { data, error } = await supabase
     .from('customers')
     .insert({
@@ -39,7 +39,7 @@ export async function createCustomer(fd: FormData) {
 }
 
 export async function addContact(fd: FormData) {
-  const { supabase } = await requireStaff();
+  const { supabase } = await requirePerm('customers');
   const customer_id = String(fd.get('customer_id'));
   await supabase.from('contacts').insert({
     customer_id,
@@ -55,7 +55,7 @@ export async function addContact(fd: FormData) {
 }
 
 export async function addPlant(fd: FormData) {
-  const { supabase } = await requireStaff();
+  const { supabase } = await requirePerm('customers');
   const customer_id = String(fd.get('customer_id'));
   const { data } = await supabase
     .from('plants')
@@ -81,7 +81,7 @@ export async function addPlant(fd: FormData) {
 }
 
 export async function saveAssessment(fd: FormData) {
-  const { supabase, staff } = await requireStaff();
+  const { supabase, staff } = await requirePerm('customers');
   const customer_id = String(fd.get('customer_id'));
   const plant_id = String(fd.get('plant_id'));
   const row: Record<string, unknown> = { plant_id, assessed_by: staff.id, assessed_on: new Date().toISOString().slice(0, 10) };
@@ -94,7 +94,7 @@ export async function saveAssessment(fd: FormData) {
 }
 
 export async function uploadPhotos(fd: FormData) {
-  const { supabase, user } = await requireStaff();
+  const { supabase, user } = await requirePerm('customers');
   const customer_id = String(fd.get('customer_id'));
   const plant_id = str(fd, 'plant_id');
   const category = str(fd, 'category') ?? 'dach_anlage';
@@ -116,7 +116,7 @@ export async function uploadPhotos(fd: FormData) {
 }
 
 export async function createOrder(fd: FormData) {
-  const { supabase } = await requireStaff();
+  const { supabase } = await requirePerm('customers');
   const customer_id = String(fd.get('customer_id'));
   const plant_id = str(fd, 'plant_id');
   let area_m2: number | null = null;
@@ -140,7 +140,7 @@ export async function createOrder(fd: FormData) {
 }
 
 export async function addDocument(fd: FormData) {
-  const { supabase } = await requireStaff();
+  const { supabase } = await requirePerm('finance');
   const customer_id = String(fd.get('customer_id'));
   await supabase.from('documents').insert({
     customer_id,
@@ -158,7 +158,7 @@ export async function addDocument(fd: FormData) {
 }
 
 export async function setDocumentStatus(fd: FormData) {
-  const { supabase } = await requireStaff();
+  const { supabase } = await requirePerm('finance');
   const customer_id = String(fd.get('customer_id'));
   const status = String(fd.get('status'));
   const today = new Date().toISOString().slice(0, 10);
@@ -171,7 +171,7 @@ export async function setDocumentStatus(fd: FormData) {
 }
 
 export async function addNote(fd: FormData) {
-  const { supabase } = await requireStaff();
+  const { supabase } = await requirePerm('customers');
   const customer_id = String(fd.get('customer_id'));
   const title = str(fd, 'title');
   if (!title) return;

@@ -6,10 +6,12 @@ insert into auth.users (id, email) values
   ('00000000-0000-0000-0000-00000000000a', 'marcel@team'),
   ('00000000-0000-0000-0000-00000000000b', 'kunde.a@app'),
   ('00000000-0000-0000-0000-00000000000c', 'kunde.b@app'),
-  ('00000000-0000-0000-0000-00000000000d', 'ex.mitarbeiter@team');
-insert into staff (id, full_name, initials, role, can_work_alone, is_drone_pilot) values
-  ('00000000-0000-0000-0000-00000000000a', 'Marcel', 'MT', 'admin', true, true),
-  ('00000000-0000-0000-0000-00000000000d', 'Ehemalig', 'EH', 'field', false, false);
+  ('00000000-0000-0000-0000-00000000000d', 'ex.mitarbeiter@team'),
+  ('00000000-0000-0000-0000-00000000000e', 'thomas@team');
+insert into staff (id, full_name, initials, role, can_work_alone, is_drone_pilot, perm_customers, perm_dispatch, perm_finance, perm_team, perm_settings) values
+  ('00000000-0000-0000-0000-00000000000a', 'Marcel', 'MT', 'admin', true, true, true, true, true, true, true),
+  ('00000000-0000-0000-0000-00000000000d', 'Ehemalig', 'EH', 'field', false, false, true, true, true, false, false),
+  ('00000000-0000-0000-0000-00000000000e', 'Thomas', 'TH', 'field', true, false, true, true, false, false, false);
 update staff set active = false where id = '00000000-0000-0000-0000-00000000000d';
 insert into customers (id, name) values
   ('10000000-0000-0000-0000-00000000000a', 'Familie Weber'),
@@ -45,6 +47,56 @@ select assert((select count(*) from events where kind = 'buchung') = 1, 'Buchung
 update orders set status = 'angenommen' where source = 'website';
 select assert((select count(*) from events where kind = 'status') = 1, 'Statuswechsel landet in der Historie');
 commit;
+
+-- ── Außendienst ohne Finanz-Recht ───────────────────────────
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000e', true);
+select assert((select count(*) from customers) = 2, 'Außendienst sieht Kundendaten');
+select assert((select count(*) from orders) = 1, 'Außendienst sieht Aufträge');
+select assert((select count(*) from documents) = 0, 'Außendienst sieht keine Rechnungen/Angebote');
+select assert((select count(*) from events where kind in ('rechnung','zahlung','mahnung')) = 0, 'Außendienst sieht keine Finanz-Einträge in der Historie');
+select assert((select count(*) from events where kind = 'buchung') = 1, 'Außendienst sieht übrige Historie');
+select assert((select count(*) from staff) = 3, 'Außendienst sieht Kollegen (für Disposition)');
+update staff set perm_finance = true where id = '00000000-0000-0000-0000-00000000000e';
+commit;
+select assert((select perm_finance from staff where id = '00000000-0000-0000-0000-00000000000e') = false, 'Außendienst kann sich kein Finanz-Recht geben');
+do $$
+declare blocked int := 0;
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000e', true);
+  set local role authenticated;
+  begin
+    insert into documents (customer_id, type, status) values ('10000000-0000-0000-0000-00000000000a', 'rechnung', 'entwurf');
+  exception when insufficient_privilege then blocked := blocked + 1; end;
+  begin
+    update services set price_per_m2 = 0.5;
+    if found then raise exception 'Preis geändert'; end if;
+    blocked := blocked + 1;
+  end;
+  perform assert(blocked = 2, 'Außendienst kann keine Rechnung anlegen und keine Preise ändern');
+end $$;
+
+-- ── Admin: Rechte vergeben, aber nicht aussperren ───────────
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+update staff set perm_finance = true where id = '00000000-0000-0000-0000-00000000000e';
+select assert((select perm_finance from staff where id = '00000000-0000-0000-0000-00000000000e'), 'Admin kann Rechte vergeben');
+update staff set perm_finance = false where id = '00000000-0000-0000-0000-00000000000e';
+commit;
+do $$
+begin
+  perform set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-00000000000a', true);
+  set local role authenticated;
+  begin
+    update staff set perm_team = false where id = '00000000-0000-0000-0000-00000000000a';
+    raise exception 'TEST FEHLGESCHLAGEN: Selbst-Aussperren möglich';
+  exception when raise_exception then
+    if sqlerrm like 'TEST FEHLGESCHLAGEN%' then raise; end if;
+  end;
+  perform assert(true, 'Admin kann sich nicht selbst aussperren');
+end $$;
 
 -- ── Ehemaliger Mitarbeiter (deaktiviert) ────────────────────
 begin;

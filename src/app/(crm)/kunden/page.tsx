@@ -1,12 +1,15 @@
 import Link from 'next/link';
-import { requireStaff } from '@/lib/auth';
+import { redirect } from 'next/navigation';
+import { can, requireStaff } from '@/lib/auth';
 import { CUSTOMER_KIND } from '@/lib/labels';
 import { createCustomer } from './actions';
 
 type Row = { id: string; customer_no: string; name: string; kind: string; city: string | null; plants: { area_m2: number | null }[]; orders: { status: string }[] };
 
 export default async function KundenPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  const { supabase } = await requireStaff();
+  const { supabase, staff } = await requireStaff();
+  const edit = can(staff, 'customers');
+  if (!edit && !can(staff, 'dispatch')) redirect('/?fehler=keine-berechtigung');
   const { q } = await searchParams;
 
   let query = supabase
@@ -57,7 +60,7 @@ export default async function KundenPage({ searchParams }: { searchParams: Promi
           </div>
         </section>
 
-        <section className="card card-pad col-side" aria-labelledby="new-h">
+        {edit && <section className="card card-pad col-side" aria-labelledby="new-h">
           <h2 id="new-h">Neuer Kunde</h2>
           <form action={createCustomer} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="field"><label htmlFor="name">Name / Firma</label><input id="name" name="name" required /></div>
@@ -77,7 +80,7 @@ export default async function KundenPage({ searchParams }: { searchParams: Promi
             <div className="field"><label htmlFor="lead_source">Wie auf uns aufmerksam?</label><input id="lead_source" name="lead_source" placeholder="z. B. Google, Empfehlung, Messe" /></div>
             <button type="submit" className="btn btn-primary">Kunde anlegen</button>
           </form>
-        </section>
+        </section>}
       </div>
     </>
   );

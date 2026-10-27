@@ -1,12 +1,13 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { requireStaff, getSetting } from '@/lib/auth';
+import { can, requireStaff, getSetting } from '@/lib/auth';
 import { decideCrew, estimateCleaningPrice, type RoofType } from '@/lib/rules';
 
 /** Buchung annehmen: Besetzung und Richtpreis nach den Regeln setzen. */
 export async function acceptOrder(formData: FormData) {
-  const { supabase } = await requireStaff();
+  const { supabase, staff } = await requireStaff();
+  if (!can(staff, 'customers') && !can(staff, 'dispatch')) return;
   const id = String(formData.get('order_id'));
 
   const { data: order, error } = await supabase
